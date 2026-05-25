@@ -277,6 +277,42 @@ void yyerror(const char *s) {
 }
 
 int yylex(void);
+%%
 
+program
+    : task_list
+        {
+            validate_all_dependencies_exist();
+            detect_circular_dependencies();
+            print_validation_summary();
+            execute_tasks_by_dependency();
+        }
+    ;
+
+task_list
+    : task
+    | task_list task
+    ;
+
+task
+    : TASK IDENT LBRACE { strcpy(current_task_name, $2); add_task($2); } task_body RBRACE
+    ;
+
+task_body
+    : run_stmt optional_parts
+    ;
+
+run_stmt
+    : RUN STRING
+        { set_task_command(current_task_name, $2); }
+    ;
+
+optional_parts
+    : /* empty */
+    | optional_parts schedule
+    | optional_parts dependency
+    | optional_parts condition
+    | optional_parts constraint
+    ;
 
 }
