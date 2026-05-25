@@ -315,4 +315,32 @@ optional_parts
     | optional_parts constraint
     ;
 
+schedule
+    : time_schedule
+    | event_schedule
+    ;
+
+time_schedule
+    : EVERY DAY AT TIME
+        {
+            char buf[256];
+            sprintf(buf, "EVERY DAY AT %s", $4);
+            set_task_schedule(current_task_name, buf, 1);
+        }
+    | EVERY WEEK ON DAYNAME AT TIME
+        {
+            char buf[256];
+            sprintf(buf, "EVERY WEEK ON %s AT %s", $4, $6);
+            set_task_schedule(current_task_name, buf, 1);
+        }
+    ;
+
+event_schedule
+    : TRIGGER ON IDENT
+        {
+            char buf[256];
+            sprintf(buf, "TRIGGER ON %s", $3);
+            set_task_schedule(current_task_name, buf, 0);
+        }
+    ;
 }
