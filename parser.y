@@ -24,7 +24,19 @@ typedef struct Task {
 Task tasks[MAX_TASKS];
 int task_count = 0;
 char current_task_name[256];
+%}
 
+%union {
+    int num;
+    char *string;
+}
+
+%token TASK RUN EVERY DAY WEEK ON AT TRIGGER AFTER BEFORE DEPENDS IF SUCCESS FAILURE WITHIN
+%token <string> IDENT STRING TIME DAYNAME
+%token <num> NUMBER
+%token LBRACE RBRACE ERROR
+
+%start program
 
 int find_task(const char *name) {
     for (int i = 0; i < task_count; i++)
