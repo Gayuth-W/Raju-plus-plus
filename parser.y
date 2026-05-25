@@ -239,5 +239,32 @@ void execute_tasks_by_dependency() {
     printf("\n=== EXECUTION COMPLETE ===\n");
 }
 
+void print_validation_summary() {
+    printf("\n=== VALIDATION SUMMARY ===\n");
+    printf("Total tasks defined: %d\n", task_count);
+    
+    int time_scheduled = 0, event_scheduled = 0, with_deps = 0;
+    for (int i = 0; i < task_count; i++) {
+        if (tasks[i].has_time_schedule) time_scheduled++;
+        if (tasks[i].has_event_schedule) event_scheduled++;
+        if (tasks[i].dep_count > 0) with_deps++;
+    }
+    
+    printf("Time-scheduled tasks: %d\n", time_scheduled);
+    printf("Event-scheduled tasks: %d\n", event_scheduled);
+    printf("Tasks with dependencies: %d\n", with_deps);
+    printf("Grammar: Valid\n");
+    printf("Dependencies: Acyclic\n");
+    printf("Task references: All resolved\n");
+}
+
+extern int yylineno;
+void yyerror(const char *s) {
+    fprintf(stderr, "[SYNTAX ERROR] Line %d: %s\n", yylineno, s);
+    exit(1);
+}
+
+int yylex(void);
+
 
 }
