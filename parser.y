@@ -143,4 +143,101 @@ void detect_circular_dependencies() {
     }
 }
 
+
+int simulate_task_execution(int task_idx) {
+    Task *t = &tasks[task_idx];
+    
+    printf("\n--- Executing: %s ---\n", t->name);
+    printf("Command: %s\n", t->command);
+    if (t->schedule)
+        printf("Schedule: %s\n", t->schedule);
+    if (t->dep_count > 0) {
+        printf("Depends on:");
+        for (int i = 0; i < t->dep_count; i++)
+            printf(" %s", t->dependencies[i]);
+        printf("\n");
+    }
+    if (t->condition)
+        printf("Condition: %s\n", t->condition);
+    if (t->timeout > 0)
+        printf("Timeout: %d seconds\n", t->timeout);
+    
+    int success = 1;  /* Change to 0 to simulate failure */
+    
+    if (success) {
+        printf("Status: SUCCESS (simulated)\n");
+    } else {
+        printf("Status: FAILURE (simulated)\n");
+    }
+    
+    return success;
+}
+
+void execute_tasks_by_dependency() {
+    printf("\n=== EXECUTION START ===\n");
+    
+    int executed[MAX_TASKS] = {0};
+    int task_result[MAX_TASKS] = {0};
+    int remaining = task_count;
+    
+    while (remaining > 0) {
+        int found = 0;
+        
+        for (int i = 0; i < task_count; i++) {
+            if (executed[i]) continue;
+            
+            int deps_satisfied = 1;
+            int dep_failed = 0;
+            
+            for (int j = 0; j < tasks[i].dep_count; j++) {
+                int dep_idx = find_task(tasks[i].dependencies[j]);
+                if (dep_idx >= 0) {
+                    if (!executed[dep_idx]) {
+                        deps_satisfied = 0;
+                        break;
+                    }
+                    if (task_result[dep_idx] == -1) {
+                        dep_failed = 1;
+                    }
+                }
+            }
+            
+            if (!deps_satisfied) continue;
+            
+            int should_execute = 1;
+            if (tasks[i].condition && dep_failed) {
+                if (strcmp(tasks[i].condition, "success") == 0) {
+                    should_execute = 0;
+                }
+            }
+            if (tasks[i].condition && !dep_failed) {
+                if (strcmp(tasks[i].condition, "failure") == 0) {
+                    should_execute = 0;
+                }
+            }
+            
+            if (should_execute) {
+                int result = simulate_task_execution(i);
+                task_result[i] = result ? 1 : -1;
+            } else {
+                printf("\n--- Skipping: %s ---\n", tasks[i].name);
+                printf("Reason: Condition '%s' not met\n", tasks[i].condition);
+                task_result[i] = -1;
+            }
+            
+            executed[i] = 1;
+            found = 1;
+            remaining--;
+        }
+        
+        if (!found) {
+            fprintf(stderr, "\n[ERROR] Unable to resolve dependencies.\n");
+            break;
+        }
+    }
+    
+    printf("\n=== EXECUTION COMPLETE ===\n");
+}
+
+
 }
