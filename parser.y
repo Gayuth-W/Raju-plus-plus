@@ -97,4 +97,50 @@ void set_task_timeout(const char *name, int sec) {
         tasks[idx].timeout = sec;
 }
 
+void validate_all_dependencies_exist() {
+    for (int i = 0; i < task_count; i++) {
+        for (int j = 0; j < tasks[i].dep_count; j++) {
+            if (find_task(tasks[i].dependencies[j]) == -1) {
+                fprintf(stderr, "[SEMANTIC ERROR] Task '%s' depends on unknown task '%s'\n",
+                        tasks[i].name, tasks[i].dependencies[j]);
+                exit(1);
+            }
+        }
+    }
+}
+
+int has_cycle_util(int idx, int *visited, int *rec_stack) {
+    if (rec_stack[idx]) return 1;
+    if (visited[idx]) return 0;
+    
+    visited[idx] = 1;
+    rec_stack[idx] = 1;
+    
+    for (int i = 0; i < tasks[idx].dep_count; i++) {
+        int dep_idx = find_task(tasks[idx].dependencies[i]);
+        if (dep_idx >= 0) {
+            if (has_cycle_util(dep_idx, visited, rec_stack))
+                return 1;
+        }
+    }
+    
+    rec_stack[idx] = 0;
+    return 0;
+}
+
+void detect_circular_dependencies() {
+    int visited[MAX_TASKS] = {0};
+    int rec_stack[MAX_TASKS] = {0};
+    
+    for (int i = 0; i < task_count; i++) {
+        if (!visited[i]) {
+            if (has_cycle_util(i, visited, rec_stack)) {
+                fprintf(stderr, "[SEMANTIC ERROR] Circular dependency detected involving task '%s'\n",
+                        tasks[i].name);
+                exit(1);
+            }
+        }
+    }
+}
+
 }
