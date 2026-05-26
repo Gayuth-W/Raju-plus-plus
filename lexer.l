@@ -17,12 +17,7 @@ void report_lex_error(const char *msg) {
 
 "TASK"                  { return TASK; }
 "RUN"                   { return RUN; }
-"EVERY"                 { return EVERY; }
-"DAY"                   { return DAY; }
-"WEEK"                  { return WEEK; }
 "ON"                    { return ON; }
-"AT"                    { return AT; }
-"TRIGGER"               { return TRIGGER; }
 "AFTER"                 { return AFTER; }
 "BEFORE"                { return BEFORE; }
 "DEPENDS"               { return DEPENDS; }
@@ -30,23 +25,6 @@ void report_lex_error(const char *msg) {
 "success"               { return SUCCESS; }
 "failure"               { return FAILURE; }
 "WITHIN"                { return WITHIN; }
-
-MONDAY|TUESDAY|WEDNESDAY|THURSDAY|FRIDAY|SATURDAY|SUNDAY {
-    yylval.string = strdup(yytext);
-    return DAYNAME;
-}
-
-[0-9]+:[0-9]{2}         { 
-    /* Validate time format */
-    int hh, mm;
-    sscanf(yytext, "%d:%d", &hh, &mm);
-    if (hh < 0 || hh > 23 || mm < 0 || mm > 59) {
-        report_lex_error("Invalid time: hours must be 00-23, minutes 00-59");
-        return ERROR;
-    }
-    yylval.string = strdup(yytext);
-    return TIME;
-}
 
 [0-9]+                  { 
     yylval.num = atoi(yytext);

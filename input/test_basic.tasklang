@@ -1,0 +1,13 @@
+TASK Build {
+    RUN "mkdir -p test_dir"
+}
+
+TASK RunScript {
+    RUN "python3 test.py"
+    AFTER Build
+}
+
+TASK Cleanup {
+    RUN "rm -rf test_dir"
+    AFTER RunScript
+}

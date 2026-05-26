@@ -2,6 +2,21 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
+#include <sys/types.h>
+#include <sys/wait.h>
+#include <signal.h>
+#include <errno.h>
+
+volatile sig_atomic_t timeout_triggered = 0;
+pid_t current_child_pid = -1;
+
+void alarm_handler(int sig) {
+    timeout_triggered = 1;
+    if (current_child_pid > 0) {
+        kill(current_child_pid, SIGKILL);
+    }
+}
 
 #define MAX_TASKS 100
 #define MAX_DEPENDENCIES 10
@@ -9,13 +24,10 @@
 typedef struct Task {
     char *name;
     char *command;
-    char *schedule;
     char **dependencies;
     int dep_count;
     char *condition;
     int timeout;
-    int has_time_schedule;
-    int has_event_schedule;
     int executed;
     int result;
     int in_degree;
@@ -39,13 +51,10 @@ void add_task(const char *name) {
     }
     tasks[task_count].name = strdup(name);
     tasks[task_count].command = NULL;
-    tasks[task_count].schedule = NULL;
     tasks[task_count].dependencies = NULL;
     tasks[task_count].dep_count = 0;
     tasks[task_count].condition = NULL;
     tasks[task_count].timeout = 0;
-    tasks[task_count].has_time_schedule = 0;
-    tasks[task_count].has_event_schedule = 0;
     tasks[task_count].executed = 0;
     tasks[task_count].result = 0;
     tasks[task_count].in_degree = 0;
@@ -58,16 +67,7 @@ void set_task_command(const char *name, const char *cmd) {
         tasks[idx].command = strdup(cmd);
 }
 
-void set_task_schedule(const char *name, const char *sched, int is_time) {
-    int idx = find_task(name);
-    if (idx >= 0) {
-        tasks[idx].schedule = strdup(sched);
-        if (is_time)
-            tasks[idx].has_time_schedule = 1;
-        else
-            tasks[idx].has_event_schedule = 1;
-    }
-}
+
 
 void add_task_dependency(const char *name, const char *dep) {
     int idx = find_task(name);
@@ -142,30 +142,127 @@ void detect_circular_dependencies() {
     }
 }
 
-int simulate_task_execution(int task_idx) {
+int execute_task_real(int task_idx) {
     Task *t = &tasks[task_idx];
     
-    printf("\n--- Executing: %s ---\n", t->name);
+    printf("\n--- EXECUTING: %s ---\n", t->name);
     printf("Command: %s\n", t->command);
-    if (t->schedule)
-        printf("Schedule: %s\n", t->schedule);
-    if (t->dep_count > 0) {
-        printf("Depends on:");
-        for (int i = 0; i < t->dep_count; i++)
-            printf(" %s", t->dependencies[i]);
-        printf("\n");
-    }
-    if (t->condition)
-        printf("Condition: %s\n", t->condition);
-    if (t->timeout > 0)
-        printf("Timeout: %d seconds\n", t->timeout);
     
-    int success = 1;  /* Change to 0 to simulate failure */
+    int pipefd[2];
+    if (pipe(pipefd) == -1) {
+        perror("[ERROR] pipe failed");
+        printf("Status: FAILURE\n");
+        return 0;
+    }
+    
+    timeout_triggered = 0;
+    current_child_pid = fork();
+    
+    if (current_child_pid == -1) {
+        perror("[ERROR] fork failed");
+        close(pipefd[0]);
+        close(pipefd[1]);
+        printf("Status: FAILURE\n");
+        return 0;
+    }
+    
+    if (current_child_pid == 0) {
+        // Child process
+        // Redirect stdout and stderr to the write end of the pipe
+        dup2(pipefd[1], STDOUT_FILENO);
+        dup2(pipefd[1], STDERR_FILENO);
+        
+        // Close both pipe descriptors in child
+        close(pipefd[0]);
+        close(pipefd[1]);
+        
+        // Execute the command in standard shell
+        execl("/bin/sh", "sh", "-c", t->command, (char *)NULL);
+        
+        // If execl fails:
+        perror("[ERROR] exec failed");
+        exit(127);
+    }
+    
+    // Parent process
+    close(pipefd[1]); // Close unused write end
+    
+    // Set up timeout if within constraint is specified
+    struct sigaction sa;
+    struct sigaction old_sa;
+    int has_timeout = (t->timeout > 0);
+    
+    if (has_timeout) {
+        memset(&sa, 0, sizeof(sa));
+        sa.sa_handler = alarm_handler;
+        sigemptyset(&sa.sa_mask);
+        sigaction(SIGALRM, &sa, &old_sa);
+        alarm(t->timeout);
+    }
+    
+    char buffer[4096];
+    ssize_t bytes_read;
+    
+    while (1) {
+        bytes_read = read(pipefd[0], buffer, sizeof(buffer) - 1);
+        if (bytes_read > 0) {
+            buffer[bytes_read] = '\0';
+            printf("%s", buffer);
+            fflush(stdout);
+        } else if (bytes_read == 0) {
+            // EOF reached
+            break;
+        } else {
+            if (errno == EINTR) {
+                if (timeout_triggered) {
+                    break;
+                }
+                continue; // Interrupted by other signal, retry read
+            }
+            perror("[ERROR] read failed");
+            break;
+        }
+    }
+    
+    close(pipefd[0]);
+    
+    // Wait for the child process and gather exit status
+    int status;
+    pid_t wpid;
+    do {
+        wpid = waitpid(current_child_pid, &status, 0);
+    } while (wpid == -1 && errno == EINTR);
+    
+    // Disable alarm and restore previous handler
+    if (has_timeout) {
+        alarm(0);
+        sigaction(SIGALRM, &old_sa, NULL);
+    }
+    
+    int success = 0;
+    if (timeout_triggered) {
+        fprintf(stderr, "[ERROR] Task '%s' timed out after %d seconds and was terminated.\n", t->name, t->timeout);
+        success = 0;
+    } else if (wpid == -1) {
+        perror("[ERROR] waitpid failed");
+        success = 0;
+    } else {
+        if (WIFEXITED(status)) {
+            int exit_code = WEXITSTATUS(status);
+            if (exit_code == 0) {
+                success = 1;
+            } else {
+                success = 0;
+            }
+        } else if (WIFSIGNALED(status)) {
+            success = 0;
+        }
+    }
     
     if (success) {
-        printf("Status: SUCCESS (simulated)\n");
+        printf("Status: SUCCESS\n");
     } else {
-        printf("Status: FAILURE (simulated)\n");
+        printf("Status: FAILURE\n");
     }
     
     return success;
@@ -215,7 +312,7 @@ void execute_tasks_by_dependency() {
             }
             
             if (should_execute) {
-                int result = simulate_task_execution(i);
+                int result = execute_task_real(i);
                 task_result[i] = result ? 1 : -1;
             } else {
                 printf("\n--- Skipping: %s ---\n", tasks[i].name);
@@ -241,15 +338,12 @@ void print_validation_summary() {
     printf("\n=== VALIDATION SUMMARY ===\n");
     printf("Total tasks defined: %d\n", task_count);
     
-    int time_scheduled = 0, event_scheduled = 0, with_deps = 0;
+    int with_deps = 0;
     for (int i = 0; i < task_count; i++) {
-        if (tasks[i].has_time_schedule) time_scheduled++;
-        if (tasks[i].has_event_schedule) event_scheduled++;
-        if (tasks[i].dep_count > 0) with_deps++;
+        if (tasks[i].dep_count > 0)
+            with_deps++;
     }
     
-    printf("Time-scheduled tasks: %d\n", time_scheduled);
-    printf("Event-scheduled tasks: %d\n", event_scheduled);
     printf("Tasks with dependencies: %d\n", with_deps);
     printf("Grammar: Valid\n");
     printf("Dependencies: Acyclic\n");
@@ -270,8 +364,8 @@ int yylex(void);
     char *string;
 }
 
-%token TASK RUN EVERY DAY WEEK ON AT TRIGGER AFTER BEFORE DEPENDS IF SUCCESS FAILURE WITHIN
-%token <string> IDENT STRING TIME DAYNAME
+%token TASK RUN ON AFTER BEFORE DEPENDS IF SUCCESS FAILURE WITHIN
+%token <string> IDENT STRING
 %token <num> NUMBER
 %token LBRACE RBRACE ERROR
 
@@ -281,12 +375,6 @@ int yylex(void);
 
 program
     : task_list
-        {
-            validate_all_dependencies_exist();
-            detect_circular_dependencies();
-            print_validation_summary();
-            execute_tasks_by_dependency();
-        }
     ;
 
 task_list
@@ -309,39 +397,9 @@ run_stmt
 
 optional_parts
     : /* empty */
-    | optional_parts schedule
     | optional_parts dependency
     | optional_parts condition
     | optional_parts constraint
-    ;
-
-schedule
-    : time_schedule
-    | event_schedule
-    ;
-
-time_schedule
-    : EVERY DAY AT TIME
-        {
-            char buf[256];
-            sprintf(buf, "EVERY DAY AT %s", $4);
-            set_task_schedule(current_task_name, buf, 1);
-        }
-    | EVERY WEEK ON DAYNAME AT TIME
-        {
-            char buf[256];
-            sprintf(buf, "EVERY WEEK ON %s AT %s", $4, $6);
-            set_task_schedule(current_task_name, buf, 1);
-        }
-    ;
-
-event_schedule
-    : TRIGGER ON IDENT
-        {
-            char buf[256];
-            sprintf(buf, "TRIGGER ON %s", $3);
-            set_task_schedule(current_task_name, buf, 0);
-        }
     ;
 
 dependency
@@ -388,8 +446,18 @@ int main(int argc, char **argv) {
     printf("Parsing file: %s\n", argv[1]);
     printf("----------------------------------------\n");
     
-    yyparse();
-    
+    int parse_status = yyparse();
     fclose(yyin);
+    
+    if (parse_status == 0) {
+        validate_all_dependencies_exist();
+        detect_circular_dependencies();
+        print_validation_summary();
+        execute_tasks_by_dependency();
+    } else {
+        fprintf(stderr, "[ERROR] Parsing failed.\n");
+        return 1;
+    }
+    
     return 0;
 }

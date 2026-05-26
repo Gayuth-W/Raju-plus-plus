@@ -1,0 +1,26 @@
+TASK FailingTask {
+    RUN "exit 1"
+}
+
+TASK SuccessConditionalTask {
+    RUN "echo 'Success conditional ran!'"
+    AFTER FailingTask
+    IF success
+}
+
+TASK FailureConditionalTask {
+    RUN "echo 'Failure conditional ran!'"
+    AFTER FailingTask
+    IF failure
+}
+
+TASK TimeoutTask {
+    RUN "echo 'TimeoutTask started...' && sleep 10 && echo 'TimeoutTask finished...'"
+    WITHIN 2
+}
+
+TASK PostTimeoutTask {
+    RUN "echo 'PostTimeoutTask ran!'"
+    AFTER TimeoutTask
+    IF failure
+}
