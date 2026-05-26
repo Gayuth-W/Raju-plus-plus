@@ -24,19 +24,6 @@ typedef struct Task {
 Task tasks[MAX_TASKS];
 int task_count = 0;
 char current_task_name[256];
-%}
-
-%union {
-    int num;
-    char *string;
-}
-
-%token TASK RUN EVERY DAY WEEK ON AT TRIGGER AFTER BEFORE DEPENDS IF SUCCESS FAILURE WITHIN
-%token <string> IDENT STRING TIME DAYNAME
-%token <num> NUMBER
-%token LBRACE RBRACE ERROR
-
-%start program
 
 int find_task(const char *name) {
     for (int i = 0; i < task_count; i++)
@@ -154,7 +141,6 @@ void detect_circular_dependencies() {
         }
     }
 }
-
 
 int simulate_task_execution(int task_idx) {
     Task *t = &tasks[task_idx];
@@ -277,6 +263,20 @@ void yyerror(const char *s) {
 }
 
 int yylex(void);
+%}
+
+%union {
+    int num;
+    char *string;
+}
+
+%token TASK RUN EVERY DAY WEEK ON AT TRIGGER AFTER BEFORE DEPENDS IF SUCCESS FAILURE WITHIN
+%token <string> IDENT STRING TIME DAYNAME
+%token <num> NUMBER
+%token LBRACE RBRACE ERROR
+
+%start program
+
 %%
 
 program
@@ -343,4 +343,53 @@ event_schedule
             set_task_schedule(current_task_name, buf, 0);
         }
     ;
+
+dependency
+    : AFTER IDENT
+        { add_task_dependency(current_task_name, $2); }
+    | BEFORE IDENT
+        { 
+            add_task_dependency($2, current_task_name);
+        }
+    | DEPENDS ON IDENT
+        { add_task_dependency(current_task_name, $3); }
+    ;
+
+condition
+    : IF SUCCESS
+        { set_task_condition(current_task_name, "success"); }
+    | IF FAILURE
+        { set_task_condition(current_task_name, "failure"); }
+    ;
+
+constraint
+    : WITHIN NUMBER
+        { set_task_timeout(current_task_name, $2); }
+    ;
+
+%%
+
+int main(int argc, char **argv) {
+    extern FILE *yyin;
+    
+    printf("\nTaskLang++ Parser - Cyber-Incident Kill Switch DSL\n");
+    
+    if (argc < 2) {
+        fprintf(stderr, "Usage: %s <input.tasklang>\n", argv[0]);
+        return 1;
+    }
+    
+    yyin = fopen(argv[1], "r");
+    if (!yyin) {
+        perror(argv[1]);
+        return 1;
+    }
+    
+    printf("Parsing file: %s\n", argv[1]);
+    printf("----------------------------------------\n");
+    
+    yyparse();
+    
+    fclose(yyin);
+    return 0;
 }
